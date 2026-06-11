@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AntiJam Pro - Đường Đi Thực Tế & Thời Gian</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; padding: 0; display: flex; height: 100vh; background-color: #f0f2f5; }
+        
+        #sidebar { width: 380px; background: white; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 12px; z-index: 1000; overflow-y: auto; }
+        #map { flex: 1; height: 100%; }
+        
+        h2 { margin-top: 0; color: #1a73e8; display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+        
+        .search-box { display: flex; gap: 5px; width: 100%; }
+        .search-box input { flex: 1; padding: 10px; border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; outline: none; }
+        .search-box input:focus { border-color: #1a73e8; }
+        
+        /* Chọn phương tiện giao thông */
+        .vehicle-selector { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 5px; }
+        .vehicle-btn { background: #f1f3f4; border: 1px solid #dadce0; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: center; transition: 0.2s; }
+        .vehicle-btn.active { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; font-weight: bold; }
+        
+        .btn { background: #1a73e8; color: white; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.3s; }
+        .btn:hover { background: #1557b0; }
+        
+        .btn-report { background: #d93025; box-shadow: 0 4px 6px rgba(217, 48, 37, 0.3); font-size: 15px; padding: 12px; width: 100%; }
+        .btn-report:hover { background: #b31412; }
+        .btn-gps { background: #34a853; width: 100%; }
+        .btn-gps:hover { background: #2d8c47; }
+        .btn-nav { width: 100%; background: #4285f4; }
+        
+        .status-panel { background: #f8f9fa; padding: 12px; border-radius: 8px; border-left: 4px solid #1a73e8; font-size: 14px; line-height: 1.5; }
+        .alert-bump { background: #feefe3; border-left: 4px solid #e37400; color: #b06000; display: none; }
+        
+        .log-box { height: 150px; background: #202124; color: #00ff00; font-family: monospace; padding: 10px; border-radius: 8px; font-size: 12px; overflow-y: auto; }
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        
+        /* Bảng hiển thị thời gian các phương tiện */
+        .time-table { background: #f8f9fa; border-radius: 8px; padding: 10px; font-size: 13px; border: 1px solid #dadce0; }
+        .time-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #ddd; }
+        .time-row:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>📍 AntiJam Real Route</h2>
+        
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Nhập điểm đến thực tế..." onkeypress="if(event.key === 'Enter') searchDestination()">
+            <button class="btn" onclick="searchDestination()">🔍 Tìm</button>
+        </div>
+
+        <div class="vehicle-selector">
+            <div class="vehicle-btn active" id="v-car" onclick="setVehicle('car')">🚗 Ôtô</div>
+            <div class="vehicle-btn" id="v-bike" onclick="setVehicle('bike')">🏍️ Xe máy</div>
+            <div class="vehicle-btn" id="v-bicycle" onclick="setVehicle('bicycle')">🚲 Xe đạp</div>
+            <div class="vehicle-btn" id="v-walk" onclick="setVehicle('walk')">🚶 Đi bộ</div>
+        </div>
+
+        <div class="control-group">
+            <button class="btn btn-gps" onclick="getLocation()">🛰️ 1. Xác vị trí của tôi (GPS)</button>
+            <button class="btn btn-nav" onclick="startNavigation()">🚀 2. Bắt đầu di chuyển</button>
+            <button class="btn btn-report" onclick="reportTrafficJam()">⚠️ CHỖ TÔI BỊ TẮC ĐƯỜNG!</button>
+        </div>
+        
+        <div class="time-table">
+            <div style="font-weight: bold; margin-bottom: 5px; color: #5f6368;">⏱️ Thời gian di chuyển ước tính:</div>
+            <div class="time-row"><span>🚗 Ô tô:</span> <span id="t-car">--</span></div>
+            <div class="time-row"><span>🏍️ Xe máy:</span> <span id="t-bike">--</span></div>
+            <div class="time-row"><span>🚲 Xe đạp:</span> <span id="t-bicycle">--</span></div>
+            <div class="time-row"><span>🚶 Đi bộ:</span> <span id="t-walk">--</span></div>
+        </div>
+
+        <div id="status" class="status-panel">
+            <strong>Khoảng cách:</strong> <span id="route-distance">-- km</span><br>
+            <strong>Phương tiện đang chọn:</strong> <span id="current-vehicle">🚗 Ô tô</span><br>
+            <strong>Trạng thái lộ trình:</strong> <span id="route-type">Chờ nhập dữ liệu</span>
+        </div>
+
+        <div id="bump-alert" class="status-panel alert-bump">
+            <strong>🔀 TỰ ĐỘNG BUMP ĐƯỜNG REAL!</strong><br>
+            Phát hiện báo cáo ùn tắc thực tế phía trước. Đã tự động bẻ lái sang ngõ/đường tránh kế cận!
+        </div>
+
+        <div class="log-box" id="logs">
+            [Hệ thống] Nhấn nút GPS để thiết lập điểm xuất phát từ vị trí thật của bạn.
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Khởi tạo bản đồ mặc định
+        let userLocation = [21.0285, 105.8542]; 
+        const map = L.map('map').setView(userLocation, 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        let userMarker = null;
+        let destMarker = null;
+        let mainRouteLine = null;
+        let altRouteLine = null;
+        let jamMarkersGroup = L.layerGroup().addTo(map);
+
+        let reportedJams = []; 
+        let navigationInterval = null;
+        let currentStep = 0;
+        let simulatedSteps = [];
+        let hasBeenBumped = false;
+        let selectedVehicle = 'car';
+
+        // Tốc độ giả định trung bình khu vực đô thị (km/h) để tính toán thời gian cho các phương tiện
+        const speeds = { car: 40, bike: 35, bicycle: 15, walk: 5 };
+
+        function log(text) {
+            const logs = document.getElementById('logs');
+            logs.innerHTML += `<br>[${new Date().toLocaleTimeString()}] ${text}`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        // Chọn phương tiện
+        function setVehicle(type) {
+            selectedVehicle = type;
+            document.querySelectorAll('.vehicle-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`v-${type}`).classList.add('active');
+            
+            const labels = { car: '🚗 Ô tô', bike: '🏍️ Xe máy', bicycle: '🚲 Xe đạp', walk: '🚶 Đi bộ' };
+            document.getElementById('current-vehicle').innerText = labels[type];
+            log(`🎯 Đã đổi phương tiện di chuyển sang: ${labels[type]}`);
+        }
+
+        // 1. LẤY VỊ TRÍ GPS THỰC TẾ
+        function getLocation() {
+            if (navigator.geolocation) {
+                log("📡 Đang kết nối vệ tinh GPS tìm vị trí của bạn...");
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLocation = [position.coords.latitude, position.coords.longitude];
+                        map.setView(userLocation, 15);
+                        
+                        if (userMarker) {
+                            userMarker.setLatLng(userLocation);
+                        } else {
+                            userMarker = L.marker(userLocation, {
+                                icon: L.divIcon({
+                                    className: 'user-gps-icon',
+                                    html: '<div style="background: #1a73e8; width: 18px; height: 18px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.4);"></div>',
+                                    iconSize: [18, 18]
+                                })
+                            }).addTo(map).bindPopup('Vị trí thực tế của bạn').openPopup();
+                        }
+                        log("🟢 Đã xác định vị trí gốc. Hãy tìm kiếm điểm đến thực tế.");
+                    },
+                    () => { log("❌ Lỗi: Vui lòng cho phép quyền truy cập Vị trí (Location) trên trình duyệt."); }
+                );
+            }
+        }
+
+        // 2. TÌM KIẾM ĐIỂM ĐÍCH
+        function searchDestination() {
+            const query = document.getElementById('search-input').value;
+            if (!query) return alert("Vui lòng nhập điểm đến!");
+
+            log(`🔍 Đang tìm kiếm tọa độ thực tế cho: "${query}"...`);
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        const destLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+                        const name = data[0].display_name.split(',')[0];
+                        
+                        if (destMarker) map.removeLayer(destMarker);
+                        destMarker = L.marker(destLocation).addTo(map).bindPopup(`<b>Điểm đến:</b> ${name}`).openPopup();
+
+                        // GỌI API ĐỂ LẤY ĐƯỜNG ĐI REAL-WORLD THAY VÌ ĐƯỜNG THẲNG
+                        getRealOSRMRoute(userLocation, destLocation);
+                    } else {
+                        log("❌ Không tìm thấy địa danh trên bản đồ.");
+                    }
+                });
+        }
+
+        // 3. KẾT NỐI API OSRM ĐỂ LẤY ĐƯỜNG THỰC TẾ (REAL ROUTE)
+        function getRealOSRMRoute(start, end) {
+            log("🗺️ Đang kết nối máy chủ OSRM để tải bản đồ mạng lưới đường sá thực tế...");
+            
+            // API lấy tuyến đường lái xe thực tế (driving) của OpenStreetMap
+            const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.code === 'Ok' && data.routes.length > 0) {
+                        const route = data.routes[0];
+                        
+                        // Chuyển đổi định dạng GeoJSON của OSRM ([lng, lat]) về định dạng của Leaflet ([lat, lng])
+                        mainRouteCoords = route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
+                        
+                        // Lấy tổng chiều dài thực tế (đổi từ mét sang km)
+                        const distanceKm = (route.distance / 1000).toFixed(2);
+                        document.getElementById('route-distance').innerText = `${distanceKm} km`;
+
+                        // TÍNH TOÁN THỜI GIAN ĐI THỰC TẾ CHO TỪNG PHƯƠNG TIỆN
+                        calculateTravelTimes(distanceKm);
+
+                        // Vẽ tuyến chính bám theo đường thật trên bản đồ
+                        if (mainRouteLine) map.removeLayer(mainRouteLine);
+                        mainRouteLine = L.polyline(mainRouteCoords, {color: '#1a73e8', weight: 6, opacity: 0.85}).addTo(map);
+
+                        // Tạo một "Tuyến tránh giả lập" song song để chạy thuật toán Bump khi có tắc đường
+                        alternativeRouteCoords = mainRouteCoords.map(coord => [coord[0] + 0.001, coord[1] + 0.001]);
+                        if (altRouteLine) map.removeLayer(altRouteLine);
+                        altRouteLine = L.polyline(alternativeRouteCoords, {color: '#34a853', weight: 4, opacity: 0.5, dashArray: '5, 10'}).addTo(map);
+
+                        map.fitBounds(mainRouteLine.getBounds(), { padding: [40, 40] });
+                        document.getElementById('route-type').innerText = "Đường thực tế tối ưu";
+                        log(`🟢 Đã đồng bộ thành công lộ trình đường bộ thật dài ${distanceKm} km!`);
+                    } else {
+                        log("❌ Hệ thống không tìm thấy đường đi bộ/đường bộ kết nối giữa 2 vị trí này.");
+                    }
+                })
+                .catch(() => log("❌ Lỗi kết nối tới API bản đồ giao thông mạng lưới OSRM."));
+        }
+
+        // Hàm tính toán thời gian đi cho các phương tiện
+        function calculateTravelTimes(distanceKm) {
+            for (let mode in speeds) {
+                let hours = distanceKm / speeds[mode];
+                let minutes = Math.round(hours * 60);
+                
+                let timeText = minutes < 60 ? `${minutes} phút` : `${Math.floor(minutes/60)} giờ ${minutes%60} phút`;
+                document.getElementById(`t-${mode}`).innerText = timeText;
+            }
+        }
+
+        // 4. BÁO CÁO TẮC ĐƯỜNG TẠI VỊ TRÍ REAL TIME
+        function reportTrafficJam() {
+            let jamLocation = userMarker ? userMarker.getLatLng() : userLocation;
+            reportedJams.push(jamLocation);
+
+            L.marker(jamLocation, {
+                icon: L.divIcon({
+                    className: 'jam-icon',
+                    html: '<div style="background: #d93025; color: white; font-weight: bold; padding: 4px 6px; border-radius: 5px; border: 1px solid white; font-size: 11px;">⚠️ ÙN TẮC</div>',
+                    iconAnchor: [25, 15]
+                })
+            }).addTo(jamMarkersGroup);
+
+            log(`📢 ĐÃ CẬP NHẬT: Bạn báo cáo ùn tắc tại vị trí thực tế này lên hệ thống cộng đồng.`);
+            if(mainRouteLine && !hasBeenBumped) mainRouteLine.setStyle({color: '#d93025'});
+        }
+
+        // 5. MÔ PHỎNG DI CHUYỂN BÁM THEO ĐƯỜNG THỰC TẾ
+        function startNavigation() {
+            if (mainRouteCoords.length === 0) return alert("Vui lòng chọn điểm đến thực tế trước!");
+
+            clearInterval(navigationInterval);
+            currentStep = 0;
+            hasBeenBumped = false;
+            document.getElementById('bump-alert').style.display = 'none';
+            document.getElementById('route-type').innerText = "Đang đi đường thực tế...";
+            mainRouteLine.setStyle({color: '#1a73e8', weight: 6, opacity: 0.85});
+
+            log(`🚗 Bắt đầu hành trình di chuyển thực tế bằng phương tiện được chọn...`);
+            
+            // Lộ trình được sinh ra chính xác từ các khúc cua gập ghềnh thực tế của đường phố
+            simulatedSteps = mainRouteCoords; 
+
+            navigationInterval = setInterval(() => {
+                if (currentStep >= simulatedSteps.length) {
+                    clearInterval(navigationInterval);
+                    log("🏁 Đã di chuyển an toàn tới đích theo bản đồ giao thông đường bộ.");
+                    document.getElementById('route-type').innerText = "Đã tới điểm hẹn";
+                    return;
+                }
+
+                let currentPos = simulatedSteps[currentStep];
+                userMarker.setLatLng(currentPos);
+
+                // KIỂM TRA BUMP KHI GẶP ĐIỂM ĐEN TẮC ĐƯỜNG CỦA CỘNG ĐỒNG
+                if (!hasBeenBumped && reportedJams.length > 0) {
+                    for (let jam of reportedJams) {
+                        let distance = map.distance(currentPos, jam);
+                        
+                        // Nếu xe tiến sát nút giao bị báo tắc trong bán kính 120 mét
+                        if (distance < 120) { 
+                            log("🤖 THUẬT TOÁN KÍCH HOẠT: Phát hiện ngõ tắc phía trước, tự động BUMP!");
+                            hasBeenBumped = true;
+                            
+                            document.getElementById('bump-alert').style.display = 'block';
+                            document.getElementById('route-type').innerText = "Đã rẽ ngách tránh tắc";
+                            
+                            mainRouteLine.setStyle({weight: 3, opacity: 0.2});
+                            altRouteLine.setStyle({color: '#1a73e8', weight: 6, opacity: 0.9, dashArray: null});
+
+                            // Tính lại các bước di chuyển nhảy sang trục đường phụ song song kế cận
+                            simulatedSteps = alternativeRouteCoords.slice(currentStep);
+                            currentStep = 0;
+                            log("🔀 Đã tái định tuyến (Bump) thành công người dùng để tối ưu thời gian đi.");
+                            break;
+                        }
+                    }
+                }
+
+                currentStep++;
+            }, 300); // Tốc độ chạy giả lập qua các nút giao thực tế
+        }
+    </script>
+</body>
+</html>
